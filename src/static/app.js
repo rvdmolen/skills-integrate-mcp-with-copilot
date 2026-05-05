@@ -3,6 +3,131 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const userIconBtn = document.getElementById("user-icon-btn");
+  const userMenu = document.getElementById("user-menu");
+  const authToggleBtn = document.getElementById("auth-toggle-btn");
+  const authStatus = document.getElementById("auth-status");
+  const loginModal = document.getElementById("login-modal");
+  const loginForm = document.getElementById("login-form");
+  const loginMessage = document.getElementById("login-message");
+  const closeModal = document.querySelector(".close");
+  const formTitle = document.getElementById("form-title");
+  const formSubmitBtn = document.getElementById("form-submit-btn");
+  const adminNote = document.getElementById("admin-note");
+
+  let currentToken = localStorage.getItem("adminToken");
+
+  // Toggle user menu
+  userIconBtn.addEventListener("click", () => {
+    userMenu.classList.toggle("hidden");
+  });
+
+  // Close menu when clicking outside
+  document.addEventListener("click", (e) => {
+    if (e.target !== userIconBtn && !userMenu.contains(e.target)) {
+      userMenu.classList.add("hidden");
+    }
+  });
+
+  // Handle auth toggle button
+  authToggleBtn.addEventListener("click", () => {
+    if (currentToken) {
+      // Logout
+      logout();
+    } else {
+      // Show login modal
+      loginModal.classList.remove("hidden");
+    }
+  });
+
+  // Close modal
+  closeModal.addEventListener("click", () => {
+    loginModal.classList.add("hidden");
+  });
+
+  // Close modal when clicking outside
+  loginModal.addEventListener("click", (e) => {
+    if (e.target === loginModal) {
+      loginModal.classList.add("hidden");
+    }
+  });
+
+  // Handle login form submission
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+
+    try {
+      const response = await fetch(
+        `/login?username=${encodeURIComponent(
+          username
+        )}&password=${encodeURIComponent(password)}`,
+        { method: "POST" }
+      );
+
+      const result = await response.json();
+
+      if (response.ok) {
+        // Save token
+        currentToken = result.token;
+        localStorage.setItem("adminToken", currentToken);
+        
+        loginMessage.textContent = result.message;
+        loginMessage.className = "success";
+        loginMessage.classList.remove("hidden");
+
+        // Update UI
+        updateAuthStatus();
+        
+        // Close modal after 1.5 seconds
+        setTimeout(() => {
+          loginModal.classList.add("hidden");
+          loginForm.reset();
+          loginMessage.classList.add("hidden");
+        }, 1500);
+      } else {
+        loginMessage.textContent = result.detail || "Login failed";
+        loginMessage.className = "error";
+        loginMessage.classList.remove("hidden");
+      }
+    } catch (error) {
+      loginMessage.textContent = "Failed to login. Please try again.";
+      loginMessage.className = "error";
+      loginMessage.classList.remove("hidden");
+      console.error("Error logging in:", error);
+    }
+  });
+
+  // Logout function
+  async function logout() {
+    try {
+      await fetch(`/logout?token=${currentToken}`, { method: "POST" });
+    } catch (error) {
+      console.error("Error logging out:", error);
+    }
+    currentToken = null;
+    localStorage.removeItem("adminToken");
+    updateAuthStatus();
+    userMenu.classList.add("hidden");
+  }
+
+  // Update auth status display
+  function updateAuthStatus() {
+    if (currentToken) {
+      authStatus.innerHTML = "✓ Logged in as<br><strong>Teacher</strong>";
+      authToggleBtn.textContent = "Logout";
+      formTitle.textContent = "Manage Participants";
+      formSubmitBtn.textContent = "Add Participant";
+      adminNote.classList.add("hidden");
+    } else {
+      authStatus.textContent = "Not logged in";
+      authToggleBtn.textContent = "Login";
+      formTitle.textContent = "Sign Up for an Activity";
+      formSubmitBtn.textContent = "Sign Up";
+      adminNote.classList.remove("hidden");
+    }
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -30,7 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}" ${!currentToken ? "disabled" : ""}>❌</button></li>`
                   )
                   .join("")}
               </ul>
@@ -69,6 +194,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
+    event.preventDefault();
+    
+    if (!currentToken) {
+      messageDiv.textContent = "You must be logged in as a teacher to remove participants.";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+      return;
+    }
+
     const button = event.target;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
@@ -77,7 +211,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch(
         `/activities/${encodeURIComponent(
           activity
-        )}/unregister?email=${encodeURIComponent(email)}`,
+        )}/unregister?email=${encodeURIComponent(email)}&token=${encodeURIComponent(
+          currentToken
+        )}`,
         {
           method: "DELETE",
         }
@@ -114,6 +250,13 @@ document.addEventListener("DOMContentLoaded", () => {
   signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
+    if (!currentToken) {
+      messageDiv.textContent = "You must be logged in as a teacher to manage participants.";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+      return;
+    }
+
     const email = document.getElementById("email").value;
     const activity = document.getElementById("activity").value;
 
@@ -121,7 +264,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch(
         `/activities/${encodeURIComponent(
           activity
-        )}/signup?email=${encodeURIComponent(email)}`,
+        )}/signup?email=${encodeURIComponent(email)}&token=${encodeURIComponent(
+          currentToken
+        )}`,
         {
           method: "POST",
         }
@@ -155,6 +300,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Initialize app
+  // Initialize on page load
+  updateAuthStatus();
   fetchActivities();
 });

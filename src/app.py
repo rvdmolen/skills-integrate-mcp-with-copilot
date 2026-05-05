@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import os
 from pathlib import Path
+import json
+import uuid
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
@@ -18,6 +20,17 @@ app = FastAPI(title="Mergington High School API",
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+# Load teachers credentials
+def load_teachers():
+    teachers_file = os.path.join(current_dir, "teachers.json")
+    with open(teachers_file, "r") as f:
+        return json.load(f)
+
+teachers_data = load_teachers()
+
+# Session tokens for authenticated teachers
+admin_sessions = {}
 
 # In-memory activity database
 activities = {
@@ -83,14 +96,50 @@ def root():
     return RedirectResponse(url="/static/index.html")
 
 
+@app.post("/login")
+def login(username: str, password: str):
+    """Authenticate a teacher"""
+    # Check credentials against teachers data
+    for teacher in teachers_data["teachers"]:
+        if teacher["username"] == username and teacher["password"] == password:
+            # Create a session token
+            token = str(uuid.uuid4())
+            admin_sessions[token] = {"username": username}
+            return {"token": token, "message": f"Welcome, {username}!"}
+    
+    # Invalid credentials
+    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+
+@app.post("/logout")
+def logout(token: str):
+    """Logout a teacher"""
+    if token in admin_sessions:
+        del admin_sessions[token]
+        return {"message": "Logged out successfully"}
+    raise HTTPException(status_code=401, detail="Invalid token")
+
+
+@app.post("/verify-admin")
+def verify_admin(token: str):
+    """Verify if a token is valid (admin is logged in)"""
+    if token in admin_sessions:
+        return {"valid": True, "username": admin_sessions[token]["username"]}
+    return {"valid": False}
+
+
 @app.get("/activities")
 def get_activities():
     return activities
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
+def signup_for_activity(activity_name: str, email: str, token: str = None):
+    """Sign up a student for an activity (admin only)"""
+    # Check if admin is authenticated
+    if token not in admin_sessions:
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -111,8 +160,12 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
-    """Unregister a student from an activity"""
+def unregister_from_activity(activity_name: str, email: str, token: str = None):
+    """Unregister a student from an activity (admin only)"""
+    # Check if admin is authenticated
+    if token not in admin_sessions:
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
